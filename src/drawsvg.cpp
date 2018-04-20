@@ -67,7 +67,7 @@ void DrawSVG::init() {
   // generate mipmaps & set initial viewports
   for (size_t i = 0; i < tabs.size(); ++i) {
 
-	// NOTE: CS248 changes for students not to implement viewports
+  // NOTE: CS248 changes for students not to implement viewports
     viewport_imp.push_back(new ViewportImp());
     viewport_ref.push_back(new ViewportRef());
 
@@ -125,6 +125,21 @@ void DrawSVG::resize( size_t width, size_t height ) {
 
   // redraw current tab with updated transformation
   redraw();
+}
+
+void DrawSVG::keyboard_event(int key, int event, unsigned char mods) {
+  if (event == GLFW_PRESS) {
+    if (key == GLFW_KEY_LEFT_SHIFT) {
+      normalize_diff = true;
+    redraw();
+    }
+  }
+  else if (event == GLFW_RELEASE) {
+  if (key == GLFW_KEY_LEFT_SHIFT) {
+    normalize_diff = false;
+    redraw();
+    }
+  }
 }
 
 void DrawSVG::char_event( unsigned int key ) {
@@ -227,6 +242,7 @@ void DrawSVG::mouse_event(int key, int event, unsigned char mods) {
     case EVENT_PRESS:
       switch(key) {
         case MOUSE_LEFT:
+          std::cout << "Cursor location (x, y) = (" << cursor_x << ", " << cursor_y << ")" << std::endl;
           leftDown = true;
           break;
       }
@@ -246,9 +262,9 @@ void DrawSVG::cursor_event( float x, float y ) {
   // translate when left mouse button is held down
   // diff is disabled when panning - it's too slow
   if (leftDown) {
-  
     show_diff = false;
-    float dx = (x - cursor_x) / width  * tabs[current_tab]->width;
+
+  float dx = (x - cursor_x) / width  * tabs[current_tab]->width;
     float dy = (y - cursor_y) / height * tabs[current_tab]->height;
     viewport_imp[current_tab]->update_viewbox(dx, dy, 1);
     viewport_ref[current_tab]->update_viewbox(dx, dy, 1);
@@ -264,7 +280,8 @@ void DrawSVG::scroll_event( float offset_x, float offset_y ) {
   // diff is disabled when zooming - it's too slow
   if (offset_x || offset_y) {
     show_diff = false;
-    // prevent inverting axis when scrolling too fast
+
+  // prevent inverting axis when scrolling too fast
     float scale = 1 + 0.05 * offset_x + 0.05 * offset_y;
     scale = scale < 0.5 ? 0.5 : (scale > 1.5 ? 1.5 : scale); 
     viewport_imp[current_tab]->update_viewbox(0, 0, scale);
@@ -325,6 +342,7 @@ void DrawSVG::draw_diff() {
 
   // take difference and count errors
   int errorCount = 0;
+  float max_error = 0;
   for( size_t i = 0; i < width * height; i++ ) {
 
     framebuffer[i*4 + 0] = abs(reference[i*4 + 0] - framebuffer[i*4 + 0]);
@@ -332,7 +350,9 @@ void DrawSVG::draw_diff() {
     framebuffer[i*4 + 2] = abs(reference[i*4 + 2] - framebuffer[i*4 + 2]);
     framebuffer[i*4 + 3] = 255;
 
-    for( int k = 0; k < 3; k++ ) {
+  if(normalize_diff) max_error = max(max_error, (float)framebuffer[i * 4 + 0] * framebuffer[i * 4 + 0] + framebuffer[i * 4 + 1] * framebuffer[i * 4 + 1] + framebuffer[i * 4 + 2] * framebuffer[i * 4 + 2]);
+
+  for( int k = 0; k < 3; k++ ) {
       if( framebuffer[i*4+k] ) {
         errorCount++;
         break;
@@ -342,6 +362,14 @@ void DrawSVG::draw_diff() {
     osd = to_string(errorCount) + " pixels different";
   }
 
+  if(normalize_diff && max_error > 0) {
+      max_error = sqrt(max_error);
+      for( size_t i = 0; i < width * height; i++ ) {
+        framebuffer[i*4 + 0] = (float)framebuffer[i * 4 + 0] / max_error * 255.f;
+        framebuffer[i*4 + 1] = (float)framebuffer[i * 4 + 1] / max_error * 255.f;
+        framebuffer[i*4 + 2] = (float)framebuffer[i * 4 + 2] / max_error * 255.f;
+      }
+  }
 }
 
 void DrawSVG::draw_zoom() {

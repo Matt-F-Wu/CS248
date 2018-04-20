@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <vector>
 #include <queue>
+#include <tr1/unordered_map>
 
 #ifdef USE_PTHREAD
 #define HAVE_STRUCT_TIMESPEC
@@ -79,7 +80,7 @@ class SoftwareRenderer : public SVGRenderer {
 class SoftwareRendererImp : public SoftwareRenderer {
 public:
 
-	SoftwareRendererImp(SoftwareRendererRef *ref = NULL) : SoftwareRenderer(), ref(ref), resolving(false), supersample_target(NULL) { }
+	SoftwareRendererImp(SoftwareRendererRef *ref = NULL) : SoftwareRenderer(), ref(ref), resolving(false) { }
 
 	// draw an svg input to render target
 	void draw_svg(SVG& svg);
@@ -98,7 +99,7 @@ public:
 private:
 
 	// Super-sample target
-	unsigned char* supersample_target;
+	std::tr1::unordered_map<int, Color*> supersample_target;
 
 	// A boolean flag to tell fill_pixel if it's in resolving phase
 	bool resolving;

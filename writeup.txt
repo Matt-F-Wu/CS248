@@ -1,8 +1,8 @@
-SuNet ID: 
+SuNet ID: wuhao20
 
-Tasks:
+Tasks: 1, 2, 3, 4, 5
 
-Extra credits:
+Extra credits: Trilinear Filtering (Already turned on in this submission)
 
-Comments and considerations:
+Comments and considerations: Because I compiled everything on my Windows Subsystems Linux (WSL), so some floating point operations might have slightly different precisions than the reference (But no visiable differences after rendering).
 

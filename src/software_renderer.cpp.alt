@@ -10,21 +10,6 @@
 using namespace std;
 
 namespace CS248 {
-inline void uint8_to_float( float dst[4], unsigned char* src ) {
-  uint8_t* src_uint8 = (uint8_t *)src;
-  dst[0] = src_uint8[0] / 255.f;
-  dst[1] = src_uint8[1] / 255.f;
-  dst[2] = src_uint8[2] / 255.f;
-  dst[3] = src_uint8[3] / 255.f;
-}
-
-inline void float_to_uint8( unsigned char* dst, float src[4] ) {
-  uint8_t* dst_uint8 = (uint8_t *)dst;
-  dst_uint8[0] = (uint8_t) floor( 255.f * max( 0.0f, min( 1.0f, src[0])));
-  dst_uint8[1] = (uint8_t) floor( 255.f * max( 0.0f, min( 1.0f, src[1])));
-  dst_uint8[2] = (uint8_t) floor( 255.f * max( 0.0f, min( 1.0f, src[2])));
-  dst_uint8[3] = (uint8_t) floor( 255.f * max( 0.0f, min( 1.0f, src[3])));
-}
 // My way of determining if normal vector is an inner normal
 bool isInner(float normal_x, float normal_y, float other_edge_x, float other_edge_y){
   if(normal_x * other_edge_x + normal_y * other_edge_y >= 0){
@@ -34,30 +19,48 @@ bool isInner(float normal_x, float normal_y, float other_edge_x, float other_edg
   }
 }
 
+class ColorS : public Color
+{
+public:
+  bool desolved;
+  ColorS(float r = 0, float g = 0, float b = 0, float a = 1.0) : 
+   Color(r, g, b, a), desolved(false){ }
+
+  ColorS(Color* c):
+   Color( c->r, c->g, c->b, c->a ), desolved(false) { }
+};
+
 // Implements SoftwareRenderer //
 
 // fill a sample location with color
 void SoftwareRendererImp::fill_sample(int x, int y, const Color &color) {
-  // Hao's optimization, I am maximizing memory efficiency here
-
   // Fill sample shouldn't really fill pixels directly, but filling the supersample_target
   //fill_pixel((int)floor(sx), (int)floor(sy), color);
   if (x < 0 || x >= target_w * sample_rate) return;
   if (y < 0 || y >= target_h * sample_rate) return;
 
-  // Pixel is out of bound, return
-  //if (x < 0 || x >= target_w * target_h * sample_rate * sample_rate * 4) {
-  //  return;
-  //}
+  Color* pixel_color;
+  
+  auto it = supersample_target.find(x + y * target_w * sample_rate);
 
-  Color pixel_color;
-  uint8_to_float(&pixel_color.r, &supersample_target[(x + y * target_w * sample_rate)*4]);
+  if(it == supersample_target.end()){
+    // If didn't have color here before, then base is white
+    pixel_color = new ColorS(1.0, 1.0, 1.0);
+  }else{
+    pixel_color = it->second;
+  }
 
-  pixel_color = ref->alpha_blending_helper(pixel_color, color);
+  Color* tmp = pixel_color;
 
-  float_to_uint8(&supersample_target[(x + y * target_w * sample_rate)*4], &pixel_color.r);
+  Color n_c = ref->alpha_blending_helper(Color(pixel_color->r, pixel_color->g, pixel_color->b, pixel_color->a), color);
 
-  //cout << "super sample color: " << pixel_color.r * 255 << endl;
+  pixel_color = new ColorS(&n_c);
+
+  delete tmp;
+
+  supersample_target[(x + y * target_w * sample_rate)] = pixel_color;
+
+  //cout << "super sample color: " << supersample_target[(x + y * target_w * sample_rate)]->r * 255 << endl;
 }
 
 // fill samples in the entire pixel specified by pixel coordinates
@@ -70,15 +73,19 @@ void SoftwareRendererImp::fill_pixel(int x, int y, const Color &color) {
 	if (y < 0 || y >= target_h) return;
 
   if(resolving){
-
   	Color pixel_color;
-    uint8_to_float(&pixel_color.r, &render_target[4 * (x + y * target_w)]);
+  	float inv255 = 1.0 / 255.0;
+  	pixel_color.r = render_target[4 * (x + y * target_w)] * inv255;
+  	pixel_color.g = render_target[4 * (x + y * target_w) + 1] * inv255;
+  	pixel_color.b = render_target[4 * (x + y * target_w) + 2] * inv255;
+  	pixel_color.a = render_target[4 * (x + y * target_w) + 3] * inv255;
 
   	pixel_color = ref->alpha_blending_helper(pixel_color, color);
 
-  	float_to_uint8(&render_target[4 * (x + y * target_w)], &pixel_color.r);
-
-    return;
+  	render_target[4 * (x + y * target_w)] = (uint8_t)(pixel_color.r * 255);
+  	render_target[4 * (x + y * target_w) + 1] = (uint8_t)(pixel_color.g * 255);
+  	render_target[4 * (x + y * target_w) + 2] = (uint8_t)(pixel_color.b * 255);
+  	render_target[4 * (x + y * target_w) + 3] = (uint8_t)(pixel_color.a * 255);
   }
   /* fill sample buffer with the pixel you draw, so points and lines that are directly drawn to 
      render_target will not be lost during the resolve step (resampling supersample_target to render_target)
@@ -87,7 +94,6 @@ void SoftwareRendererImp::fill_pixel(int x, int y, const Color &color) {
   for(int i = 0; i < sample_rate; i++){
     for(int j = 0; j < sample_rate; j++){
       //fill corresponding sample locations
-      //fill_sample(4 * ((x + y * target_w) * (sample_rate * sample_rate) + i * sample_rate + j), 0, color);
       fill_sample(x * sample_rate + i, y * sample_rate + j, color);
     }
   }
@@ -127,11 +133,12 @@ void SoftwareRendererImp::set_sample_rate( size_t sample_rate ) {
   // Task 2: 
   // You may want to modify this for supersampling support
   this->sample_rate = sample_rate;
-  unsigned char* tmp = supersample_target;
-  supersample_target = new unsigned char[target_w * target_h * sample_rate * sample_rate * 4];
-  delete tmp;
+  //unsigned char* tmp = supersample_target;
+  //supersample_target = new unsigned char[target_w * target_h * sample_rate * sample_rate * 4];
+  //delete tmp;
   clear_target();
-  memset(supersample_target, 255, 4 * target_w * target_h * sample_rate * sample_rate);
+  supersample_target.clear();
+  //memset(supersample_target, 255, 4 * target_w * target_h * sample_rate * sample_rate);
 }
 
 //set_render_target() is called whenever the user resizes the application window.
@@ -144,12 +151,9 @@ void SoftwareRendererImp::set_render_target( unsigned char* render_target,
   this->target_w = width;
   this->target_h = height;
   clear_target();
-  unsigned char* tmp = supersample_target;
-  supersample_target = new unsigned char[target_w * target_h * sample_rate * sample_rate * 4];
-  if(tmp != NULL){
-    delete tmp;
-  }
-  memset(supersample_target, 255, 4 * target_w * target_h * sample_rate * sample_rate);
+  //supersample_target = new unsigned char[target_w * target_h * sample_rate * sample_rate * 4];
+  //memset(supersample_target, 255, 4 * target_w * target_h * sample_rate * sample_rate);
+  supersample_target.clear();
   //cout << "Init supersample_target: " << (int)(supersample_target[0]) << endl;
 }
 
@@ -387,22 +391,22 @@ void SoftwareRendererImp::rasterize_triangle( float x0, float y0,
 
   //Now we have all the inner normals, we can just verify each point in the bounding box
   float x_s, y_s;
-  for(int y = min_y; y < max_y; y++){
-    for(int x = min_x; x < max_x; x++){
+  for(int x = min_x; x < max_x; x++){
+    for(int y = min_y; y < max_y; y++){
       //The step size of super samples
       float super_sample_step_size = 1.0/(2*sample_rate);
       //Location of the top left super sample of a pixel
       x_s = x + super_sample_step_size;
       y_s = y + super_sample_step_size;
 
-      for(int j = 0; j < sample_rate; j++){
-        for(int i = 0; i < sample_rate; i++){
+      for(int i = 0; i < sample_rate; i++){
+        for(int j = 0; j < sample_rate; j++){
+
           if(isInner(e0_nor_x, e0_nor_y, x_s + i*super_sample_step_size*2 - x0, y_s + j*super_sample_step_size*2 - y0) &&
             isInner(e1_nor_x, e1_nor_y, x_s + i*super_sample_step_size*2 - x1, y_s + j*super_sample_step_size*2 - y1) &&
             isInner(e2_nor_x, e2_nor_y, x_s + i*super_sample_step_size*2 - x2, y_s + j*super_sample_step_size*2 - y2)){
             //The point is inside the triangle
             //cout << "Inside..." << endl;
-            //fill_sample(4 * ((x + y * target_w) * (sample_rate * sample_rate) + i * sample_rate + j), 0, color);
             fill_sample(x * sample_rate + i, y * sample_rate + j, color);
           }
 
@@ -428,44 +432,14 @@ void SoftwareRendererImp::rasterize_image( float x0, float y0,
   //Create sampler
   Sampler2D* s = new Sampler2DImp(BILINEAR);
 
-  float super_sample_step_size = 1.0/(2*sample_rate);
-  float x_s, y_s;
-
-  for(int y = y0; y <= y1; y++){
-    for(int x = x0; x <= x1; x++){
+  for(int x = x0; x <= x1; x++){
+    for(int y = y0; y <= y1; y++){
       //Get the coordinate in texture space
-      x_s = x + super_sample_step_size;
-      y_s = y + super_sample_step_size;
-
-      for(int j = 0; j < sample_rate; j++){
-        for(int i = 0; i < sample_rate; i++){
-
-          Vector2D p = transform(Vector2D( x_s + i*super_sample_step_size*2, y_s + j*super_sample_step_size*2));
-          
-          //Bilinear sample tex
-          Color c = s->sample_bilinear(tex, p.x, p.y, 0);
-
-          /*Trilinear sampling code*/
-          // Get the top sample's mapped location
-          Vector2D p_t = transform(Vector2D( x_s + i*super_sample_step_size*2, y_s + (j-1)*super_sample_step_size*2 ));
-          // Get the right sample's mapped location
-          Vector2D p_r = transform(Vector2D( x_s + (i+1)*super_sample_step_size*2, y_s + j*super_sample_step_size*2 ));
-
-          float du_dx = (p_r.x - p.x)*tex.mipmap[0].width / (2*super_sample_step_size);
-          //cout<<du_dx<<endl;
-          float dv_dx = (p_r.y - p.y)*tex.mipmap[0].height / (2*super_sample_step_size);
-          //cout<<dv_dx<<endl;
-          float du_dy = (p.x - p_t.x)*tex.mipmap[0].width / (2*super_sample_step_size);
-          //cout<<du_dy<<endl;
-          float dv_dy = (p.y - p_t.y)*tex.mipmap[0].height / (2*super_sample_step_size); 
-          //cout<<dv_dy<<"======="<<endl;
-          c = s->sample_trilinear(tex, p.x, p.y, sqrt(du_dx*du_dx + dv_dx*dv_dx), sqrt(du_dy*du_dy + dv_dy*dv_dy));
-
-          //fill_sample(4 * ((x + y * target_w) * (sample_rate * sample_rate) + i * sample_rate + j), 0, c);
-          fill_sample(x * sample_rate + i, y * sample_rate + j, c);
-
-        }
-      }
+      Vector2D p = transform(Vector2D( x + 0.5, y + 0.5));
+      
+      //Bilinear sample tex
+      Color c = s->sample_bilinear(tex, p.x, p.y);
+      fill_pixel(x, y, c);
     }
   }
 
@@ -476,12 +450,96 @@ void SoftwareRendererImp::rasterize_image( float x0, float y0,
 
 // resolve samples to render target
 void SoftwareRendererImp::resolve( void ) {
-
   // Task 2: 
   // Implement supersampling
   // You may also need to modify other functions marked with "Task 2".
   resolving = true;
   //Box filter on supersample_target, stride is this -> sample_rate
+  for ( auto it = supersample_target.begin(); it != supersample_target.end(); ++it ){
+    int index = it->first;
+    // if index is a top-left super sample of a pixel, then process it and its "roommates"
+    if(index % (target_w * sample_rate) % sample_rate == 0 && index / (target_w * sample_rate) % sample_rate == 0){
+      float r_sum = 0.0, g_sum = 0.0, b_sum = 0.0, a_sum = 0.0;
+      for(int i = 0; i < sample_rate; i++){
+        for(int j = 0; j < sample_rate; j++){
+          auto nei = supersample_target.find(index + i * target_w * sample_rate + j);
+          if(nei == supersample_target.end() ){
+            // If neighbor is not in supersample_target, then it is just a white pixel
+            r_sum += 1.0;
+            g_sum += 1.0;
+            b_sum += 1.0;
+            a_sum += 1.0;
+          }else{
+            r_sum += nei->second->r;
+            g_sum += nei->second->g;
+            b_sum += nei->second->b;
+            a_sum += nei->second->a;
+            ((ColorS*)(nei->second))->desolved = true;
+          }
+        }
+      }
+      r_sum /= (sample_rate*sample_rate);
+      g_sum /= (sample_rate*sample_rate);
+      b_sum /= (sample_rate*sample_rate);
+      a_sum /= (sample_rate*sample_rate);
+
+      Color* c = new Color(r_sum, g_sum, b_sum, a_sum);
+      
+      fill_pixel(index % (target_w * sample_rate) / sample_rate, index / (target_w * sample_rate * sample_rate), *c);
+
+      //cout<< "Values: " << r_sum*255 << " " << g_sum*255 << " " << b_sum*255 << endl;
+
+    }else{
+
+      if(!((ColorS*)(it->second))->desolved){
+        // This is a dangling sample, its top-left roommate doesn't exist
+        // We need to draw it
+        int sy = index / (target_w * sample_rate) / sample_rate;
+        sy *= sample_rate;
+        int sx = index % (target_w * sample_rate) / sample_rate;
+        sx *= sample_rate;
+
+        if(supersample_target.find(sx + sy * target_w * sample_rate) != supersample_target.end()){
+          //found it's top-left, just continue
+          continue;
+        }
+
+        float r_sum = 0.0, g_sum = 0.0, b_sum = 0.0, a_sum = 0.0;
+        for(int i = 0; i < sample_rate; i++){
+          for(int j = 0; j < sample_rate; j++){
+            auto nei = supersample_target.find(sx + j + (sy + i) * target_w * sample_rate);
+            if(nei == supersample_target.end() ){
+              // If neighbor is not in supersample_target, then it is just a white pixel
+              r_sum += 1.0;
+              g_sum += 1.0;
+              b_sum += 1.0;
+              a_sum += 1.0;
+            }else{
+              r_sum += nei->second->r;
+              g_sum += nei->second->g;
+              b_sum += nei->second->b;
+              a_sum += nei->second->a;
+              ((ColorS*)(nei->second))->desolved = true;
+            }
+          }
+        }
+        r_sum /= (sample_rate*sample_rate);
+        g_sum /= (sample_rate*sample_rate);
+        b_sum /= (sample_rate*sample_rate);
+        a_sum /= (sample_rate*sample_rate);
+
+        Color* c = new Color(r_sum, g_sum, b_sum, a_sum);
+        
+        fill_pixel(index % (target_w * sample_rate) / sample_rate, index / (target_w * sample_rate * sample_rate), *c);
+
+        //cout<< "Values: " << r_sum*255 << " " << g_sum*255 << " " << b_sum*255 << endl;
+
+      }
+      
+    }
+  }
+
+  /*
   for (int x = 0; x < target_w; x++)
   {
     for(int y = 0; y < target_h; y++){
@@ -489,12 +547,12 @@ void SoftwareRendererImp::resolve( void ) {
 
       // Don't forget to initialize these values, or will have unexpected behavior
       float r_sum = 0.0, g_sum = 0.0, b_sum = 0.0, a_sum = 0.0;
-      for(int j = 0; j < sample_rate; j++){
-        for(int i = 0; i < sample_rate; i++){
-          r_sum += (int)supersample_target[4 * (x * sample_rate + i + (y * sample_rate + j) * target_w * sample_rate)];
-          g_sum += (int)supersample_target[4 * (x * sample_rate + i + (y * sample_rate + j) * target_w * sample_rate) + 1];
-          b_sum += (int)supersample_target[4 * (x * sample_rate + i + (y * sample_rate + j) * target_w * sample_rate) + 2];
-          a_sum += (int)supersample_target[4 * (x * sample_rate + i + (y * sample_rate + j) * target_w * sample_rate) + 3];
+      for(int i = 0; i < sample_rate; i++){
+        for(int j = 0; j < sample_rate; j++){
+          r_sum += (int)supersample_target[4 * (x * sample_rate + j + (y * sample_rate + i) * target_w * sample_rate)];
+          g_sum += (int)supersample_target[4 * (x * sample_rate + j + (y * sample_rate + i) * target_w * sample_rate) + 1];
+          b_sum += (int)supersample_target[4 * (x * sample_rate + j + (y * sample_rate + i) * target_w * sample_rate) + 2];
+          a_sum += (int)supersample_target[4 * (x * sample_rate + j + (y * sample_rate + i) * target_w * sample_rate) + 3];
         }
       }
       //get the r,g,b,a average
@@ -505,19 +563,21 @@ void SoftwareRendererImp::resolve( void ) {
 
       float inv255 = 1.0 / 255.0;
 
-      Color c = Color(r_sum * inv255, g_sum * inv255, b_sum * inv255, a_sum * inv255);
+      Color* c = new Color(r_sum * inv255, g_sum * inv255, b_sum * inv255, a_sum * inv255);
       
       //cout << "fill_pixel: " << c->r << "  supersample_target: " << (int)supersample_target[4 * (x * sample_rate + 0 + (y * sample_rate + 0) * target_w * sample_rate)] << endl;
 
-      fill_pixel(x, y, c);
+      fill_pixel(x, y, *c);
     }
   }
+  */
 
   // reset flag
   resolving = false;
 
-  memset(supersample_target, 255, 4 * target_w * target_h * sample_rate * sample_rate);
-
+  //memset(supersample_target, 255, 4 * target_w * target_h * sample_rate * sample_rate);
+  supersample_target.clear();
+  
   return;
 
 }

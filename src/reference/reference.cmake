@@ -17,11 +17,9 @@ if(DRAWSVG_BUILD_REFERENCE)
       ${CS248_DrawSVGREF_SOURCE}
   )
   
-  if(WIN32)
-    add_library( drawsvg_ref-debug STATIC
-        ${CS248_DrawSVGREF_SOURCE}
-    )
-  endif(WIN32)
+  add_library( drawsvg_ref-debug STATIC
+      ${CS248_DrawSVGREF_SOURCE}
+  )
   
   # output name
   if (UNIX)
@@ -47,6 +45,8 @@ else(DRAWSVG_BUILD_REFERENCE)
 					${CMAKE_CURRENT_SOURCE_DIR}/reference/libdrawsvgref.a)
 	endif()
   endif(UNIX)
+
+  set_property(TARGET drawsvg_ref-debug PROPERTY IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/reference/libdrawsvgref.a)
 
   if(APPLE)
     if(CS248_BUILD_THREADED)
